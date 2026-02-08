@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { appendFileSync, mkdirSync } from 'fs';
+import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs';
 import officeparser from 'officeparser';
 import JSZip from 'jszip';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
@@ -152,6 +152,35 @@ app.post('/api/reset', async (req, res) => {
   logChat(sid, 'system', 'reset');
   sessions.delete(sid);
   res.json({ ok: true });
+});
+
+// POST /api/history - retrieve chat history for a session
+app.post('/api/history', (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    const sid = sessionId || 'default';
+    const logFile = join(logDir, `${sid}.jsonl`);
+    if (!existsSync(logFile)) {
+      return res.json({ messages: [] });
+    }
+    const lines = readFileSync(logFile, 'utf-8').split('\n').filter(Boolean);
+    const messages = [];
+    for (const line of lines) {
+      const entry = JSON.parse(line);
+      if (entry.role === 'user' || entry.role === 'assistant' || entry.role === 'summary') {
+        messages.push({
+          role: entry.role === 'summary' ? 'assistant' : entry.role,
+          text: entry.text,
+          isSummary: entry.role === 'summary',
+          files: entry.files || [],
+        });
+      }
+    }
+    res.json({ messages });
+  } catch (err) {
+    console.error('History error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/export-summary - export summary as Word document

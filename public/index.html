@@ -275,7 +275,8 @@
     const resetBtn = document.getElementById('reset-btn');
     const dropOverlay = document.getElementById('drop-overlay');
 
-    const sessionId = 'session-' + Date.now();
+    const sessionId = localStorage.getItem('req-analyzer-session') || 'session-' + Date.now();
+    localStorage.setItem('req-analyzer-session', sessionId);
     let pendingImages = []; // { mediaType, data, dataUrl }
     let pendingFiles = [];  // { name, mediaType, data(base64) }
     let sending = false;
@@ -575,8 +576,39 @@
       pendingImages = [];
       pendingFiles = [];
       renderPreviews();
-      msgInput.focus();
+      // Generate new sessionId on reset
+      const newId = 'session-' + Date.now();
+      localStorage.setItem('req-analyzer-session', newId);
+      location.reload();
     }
+
+    // Load chat history on page load
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        const json = await res.json();
+        if (json.messages && json.messages.length) {
+          for (const msg of json.messages) {
+            const role = msg.role;
+            const msgDiv = appendMsg(role, msg.text, null, msg.files);
+            if (msg.isSummary) {
+              const exportBtn = document.createElement('button');
+              exportBtn.className = 'export-word-btn';
+              exportBtn.textContent = '导出 Word';
+              exportBtn.addEventListener('click', () => exportSummaryAsWord(msg.text));
+              msgDiv.appendChild(exportBtn);
+            }
+          }
+        }
+      } catch (e) {
+        // ignore history load errors
+      }
+    }
+    loadHistory();
 
     // Focus input on load
     msgInput.focus();
