@@ -1,0 +1,19 @@
+{
+  "name": "req-analyzer",
+  "version": "1.0.0",
+  "description": "对话式需求分析机器人 - 帮助产品经理通过追问补充完整需求",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "list": "node index.js --list",
+    "web": "node server.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.0",
+    "docx": "^9.1.1",
+    "officeparser": "^4.1.1"
+  }
+}

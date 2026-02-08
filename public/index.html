@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>需求分析机器人</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #e3e8f0;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+    }
+    #app-container {
+      width: 100%;
+      max-width: 840px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #f0f2f5;
+      box-shadow: 0 0 20px rgba(0,0,0,0.12);
+    }
+    header {
+      background: linear-gradient(135deg, #1a6dff, #0052d9);
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    .header-actions { display: flex; gap: 10px; }
+    .header-actions button {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .header-actions button:hover { background: rgba(255,255,255,0.3); }
+
+    #chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.5;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg-user {
+      align-self: flex-end;
+      background: #d4e4ff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-assistant {
+      align-self: flex-start;
+      background: #fff;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 1px rgba(0,0,0,0.08);
+    }
+    .msg img {
+      max-width: 240px;
+      max-height: 200px;
+      border-radius: 8px;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .msg-loading {
+      align-self: flex-start;
+      background: #fff;
+      padding: 10px 18px;
+      border-radius: 12px;
+      border-bottom-left-radius: 4px;
+      font-size: 14px;
+      color: #999;
+    }
+
+    #input-area {
+      flex-shrink: 0;
+      background: #f0f2f5;
+      border-top: 1px solid #ddd;
+      padding: 10px 16px;
+    }
+    #image-preview {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    #image-preview:empty { display: none; }
+    .preview-item {
+      position: relative;
+      display: inline-block;
+    }
+    .preview-item img {
+      width: 64px;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    .preview-item .remove-btn {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      background: #e74c3c;
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      font-size: 12px;
+      line-height: 18px;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    #input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    #msg-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+      font-size: 14px;
+      outline: none;
+      resize: none;
+      max-height: 120px;
+      line-height: 1.4;
+      font-family: inherit;
+    }
+    #msg-input:focus { border-color: #1a6dff; }
+    .input-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    #img-btn { background: #e0e0e0; }
+    #img-btn:hover { background: #d0d0d0; }
+    #send-btn { background: #1a6dff; color: #fff; }
+    #send-btn:hover { background: #0052d9; }
+    #send-btn:disabled { background: #a0a0a0; cursor: not-allowed; }
+
+    #drop-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(26,109,255,0.3);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      color: #1a6dff;
+      font-weight: 600;
+    }
+    #drop-overlay.active { display: flex; }
+
+    #file-input { display: none; }
+
+    .preview-item .file-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background: #f8f9fa;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: #555;
+      text-align: center;
+      padding: 4px;
+      overflow: hidden;
+    }
+    .preview-item .file-icon .file-ext {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1a6dff;
+      text-transform: uppercase;
+    }
+    .preview-item .file-icon .file-name {
+      margin-top: 2px;
+      max-width: 58px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .msg .file-badge {
+      display: inline-block;
+      background: #e3edff;
+      border: 1px solid #b8d4ff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      margin-bottom: 4px;
+      margin-right: 4px;
+      font-size: 12px;
+      color: #1a6dff;
+    }
+    .export-word-btn {
+      display: inline-block;
+      margin-top: 8px;
+      background: #1a6dff;
+      color: #fff;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .export-word-btn:hover { background: #0052d9; }
+  </style>
+</head>
+<body>
+  <div id="app-container">
+  <header>
+    <h1>需求分析机器人</h1>
+    <div class="header-actions">
+      <button id="summary-btn">生成摘要</button>
+      <button id="reset-btn">重置对话</button>
+    </div>
+  </header>
+
+  <div id="chat-area"></div>
+
+  <div id="input-area">
+    <div id="image-preview"></div>
+    <div id="input-row">
+      <button class="input-btn" id="img-btn" title="上传图片/文档">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      </button>
+      <textarea id="msg-input" rows="1" placeholder="输入需求描述... (可粘贴/拖拽图片或文档)"></textarea>
+      <button class="input-btn" id="send-btn" title="发送">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  </div>
+  <div id="drop-overlay">拖放图片或文档到此处</div>
+  <input type="file" id="file-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple>
+
+  <script>
+    const chatArea = document.getElementById('chat-area');
+    const msgInput = document.getElementById('msg-input');
+    const sendBtn = document.getElementById('send-btn');
+    const imgBtn = document.getElementById('img-btn');
+    const fileInput = document.getElementById('file-input');
+    const imagePreview = document.getElementById('image-preview');
+    const summaryBtn = document.getElementById('summary-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const dropOverlay = document.getElementById('drop-overlay');
+
+    const sessionId = 'session-' + Date.now();
+    let pendingImages = []; // { mediaType, data, dataUrl }
+    let pendingFiles = [];  // { name, mediaType, data(base64) }
+    let sending = false;
+
+    const DOC_EXTENSIONS = ['pdf','doc','docx','xls','xlsx','ppt','pptx'];
+    const DOC_MIME_TYPES = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+
+    function isDocFile(file) {
+      if (DOC_MIME_TYPES.includes(file.type)) return true;
+      const ext = file.name.split('.').pop().toLowerCase();
+      return DOC_EXTENSIONS.includes(ext);
+    }
+
+    function getFileExt(name) {
+      return name.split('.').pop().toUpperCase();
+    }
+
+    // Auto-resize textarea
+    msgInput.addEventListener('input', () => {
+      msgInput.style.height = 'auto';
+      msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+    });
+
+    // Send on Enter (Shift+Enter for newline)
+    msgInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    sendBtn.addEventListener('click', send);
+    imgBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      addFiles(fileInput.files);
+      fileInput.value = '';
+    });
+
+    summaryBtn.addEventListener('click', generateSummary);
+    resetBtn.addEventListener('click', resetChat);
+
+    // Drag and drop
+    let dragCounter = 0;
+    document.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      dropOverlay.classList.add('active');
+    });
+    document.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        dropOverlay.classList.remove('active');
+      }
+    });
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      dropOverlay.classList.remove('active');
+      if (e.dataTransfer.files.length) {
+        addFiles(e.dataTransfer.files);
+      }
+    });
+
+    // Paste image from clipboard
+    document.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          addFiles([item.getAsFile()]);
+          return;
+        }
+      }
+    });
+
+    function addFiles(files) {
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            const base64 = dataUrl.split(',')[1];
+            pendingImages.push({ mediaType: file.type, data: base64, dataUrl });
+            renderPreviews();
+          };
+          reader.readAsDataURL(file);
+        } else if (isDocFile(file)) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(',')[1];
+            pendingFiles.push({ name: file.name, mediaType: file.type || 'application/octet-stream', data: base64 });
+            renderPreviews();
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+
+    function renderPreviews() {
+      imagePreview.innerHTML = '';
+      pendingImages.forEach((img, i) => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        item.innerHTML = `<img src="${img.dataUrl}"><button class="remove-btn" data-type="img" data-idx="${i}">&times;</button>`;
+        imagePreview.appendChild(item);
+      });
+      pendingFiles.forEach((file, i) => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        const ext = getFileExt(file.name);
+        item.innerHTML = `<div class="file-icon"><span class="file-ext">${ext}</span><span class="file-name" title="${file.name}">${file.name}</span></div><button class="remove-btn" data-type="file" data-idx="${i}">&times;</button>`;
+        imagePreview.appendChild(item);
+      });
+      imagePreview.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.idx);
+          if (btn.dataset.type === 'img') {
+            pendingImages.splice(idx, 1);
+          } else {
+            pendingFiles.splice(idx, 1);
+          }
+          renderPreviews();
+        });
+      });
+    }
+
+    function appendMsg(role, text, images, files) {
+      const div = document.createElement('div');
+      div.className = 'msg msg-' + role;
+      if (images && images.length) {
+        images.forEach(img => {
+          const imgEl = document.createElement('img');
+          imgEl.src = img.dataUrl || `data:${img.mediaType};base64,${img.data}`;
+          div.appendChild(imgEl);
+        });
+      }
+      if (files && files.length) {
+        files.forEach(f => {
+          const badge = document.createElement('span');
+          badge.className = 'file-badge';
+          badge.textContent = f.name;
+          div.appendChild(badge);
+        });
+      }
+      if (text) {
+        const span = document.createElement('span');
+        span.textContent = text;
+        div.appendChild(span);
+      }
+      chatArea.appendChild(div);
+      chatArea.scrollTop = chatArea.scrollHeight;
+      return div;
+    }
+
+    function showLoading() {
+      const div = document.createElement('div');
+      div.className = 'msg-loading';
+      div.id = 'loading';
+      div.textContent = '正在思考...';
+      chatArea.appendChild(div);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function hideLoading() {
+      const el = document.getElementById('loading');
+      if (el) el.remove();
+    }
+
+    async function send() {
+      if (sending) return;
+      const text = msgInput.value.trim();
+      const images = [...pendingImages];
+      const files = [...pendingFiles];
+      if (!text && !images.length && !files.length) return;
+
+      // Show user message
+      appendMsg('user', text, images, files);
+      msgInput.value = '';
+      msgInput.style.height = 'auto';
+      pendingImages = [];
+      pendingFiles = [];
+      renderPreviews();
+
+      sending = true;
+      sendBtn.disabled = true;
+      showLoading();
+
+      try {
+        const body = {
+          sessionId,
+          message: text,
+          images: images.map(({ mediaType, data }) => ({ mediaType, data })),
+          files: files.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
+        };
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        hideLoading();
+        if (json.error) {
+          appendMsg('assistant', '错误: ' + json.error);
+        } else {
+          appendMsg('assistant', json.reply);
+        }
+      } catch (err) {
+        hideLoading();
+        appendMsg('assistant', '请求失败: ' + err.message);
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+        msgInput.focus();
+      }
+    }
+
+    async function generateSummary() {
+      if (sending) return;
+      sending = true;
+      sendBtn.disabled = true;
+      showLoading();
+      try {
+        const res = await fetch('/api/summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        const json = await res.json();
+        hideLoading();
+        if (json.error) {
+          appendMsg('assistant', '错误: ' + json.error);
+        } else {
+          const msgDiv = appendMsg('assistant', json.summary);
+          const exportBtn = document.createElement('button');
+          exportBtn.className = 'export-word-btn';
+          exportBtn.textContent = '导出 Word';
+          exportBtn.addEventListener('click', () => exportSummaryAsWord(json.summary));
+          msgDiv.appendChild(exportBtn);
+        }
+      } catch (err) {
+        hideLoading();
+        appendMsg('assistant', '请求失败: ' + err.message);
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    async function exportSummaryAsWord(summary) {
+      try {
+        const res = await fetch('/api/export-summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, summary }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert('导出失败: ' + (err.error || '未知错误'));
+          return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `summary-${sessionId}.docx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('导出失败: ' + err.message);
+      }
+    }
+
+    async function resetChat() {
+      if (sending) return;
+      try {
+        await fetch('/api/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+      } catch (e) { /* ignore */ }
+      chatArea.innerHTML = '';
+      pendingImages = [];
+      pendingFiles = [];
+      renderPreviews();
+      msgInput.focus();
+    }
+
+    // Focus input on load
+    msgInput.focus();
+  </script>
+</body>
+</html>
