@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { appendFileSync, mkdirSync } from 'fs';
 import officeparser from 'officeparser';
+import JSZip from 'jszip';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import { Analyzer } from './analyzer.js';
 
@@ -57,6 +58,29 @@ async function extractOfficeText(base64Data) {
   return text;
 }
 
+const IMAGE_EXT_TO_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+async function extractDocxImages(base64Data) {
+  const buffer = Buffer.from(base64Data, 'base64');
+  const zip = await JSZip.loadAsync(buffer);
+  const images = [];
+  for (const [path, file] of Object.entries(zip.files)) {
+    if (!path.startsWith('word/media/')) continue;
+    const ext = '.' + path.split('.').pop().toLowerCase();
+    const mediaType = IMAGE_EXT_TO_MIME[ext];
+    if (!mediaType) continue;
+    const data = await file.async('base64');
+    images.push({ mediaType, data });
+  }
+  return images;
+}
+
 // POST /api/chat - send message with optional images and files
 app.post('/api/chat', async (req, res) => {
   try {
@@ -76,6 +100,13 @@ app.post('/api/chat', async (req, res) => {
         } else if (OFFICE_TYPES.includes(file.mediaType)) {
           const extractedText = await extractOfficeText(file.data);
           fileDataList.push({ name: file.name, mediaType: file.mediaType, extractedText });
+          // Extract embedded images from .docx files
+          const isDocx = file.mediaType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            || file.name.toLowerCase().endsWith('.docx');
+          if (isDocx) {
+            const docxImages = await extractDocxImages(file.data);
+            imageDataList.push(...docxImages);
+          }
         }
       }
     }
