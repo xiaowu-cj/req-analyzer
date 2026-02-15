@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAD 模型查看器</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #e3e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: linear-gradient(135deg, #1a6dff, #0052d9);
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .header-right a {
+      color: rgba(255,255,255,0.85);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .header-right a:hover { color: #fff; }
+
+    /* Upload zone */
+    .upload-zone {
+      background: #f8f9fb;
+      border: 2px dashed #b0bec5;
+      border-radius: 8px;
+      margin: 12px 20px;
+      padding: 28px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: #1a6dff;
+      background: #eef3ff;
+    }
+    .upload-zone.hidden { display: none; }
+    .upload-zone p { color: #555; font-size: 14px; margin-bottom: 6px; }
+    .upload-zone .hint { color: #999; font-size: 12px; }
+    .upload-zone input[type="file"] { display: none; }
+
+    /* Status bar */
+    .upload-status {
+      margin: 0 20px 8px;
+      padding: 10px 16px;
+      background: #fff3e0;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #e65100;
+      display: none;
+    }
+    .upload-status.success { background: #e8f5e9; color: #2e7d32; }
+    .upload-status.error { background: #ffebee; color: #c62828; }
+    .upload-status.visible { display: block; }
+
+    .viewer-container {
+      display: flex;
+      flex: 1;
+      gap: 1px;
+      background: #ccc;
+      min-height: 0;
+    }
+    .panel-3d {
+      flex: 1;
+      background: #1a1a2e;
+      position: relative;
+      min-height: 500px;
+    }
+    .panel-3d canvas { display: block; width: 100%; height: 100%; }
+    .panel-3d .label {
+      position: absolute;
+      top: 10px;
+      left: 14px;
+      color: rgba(255,255,255,0.6);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .panel-2d {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      background: #ccc;
+    }
+    .dxf-view {
+      flex: 1;
+      background: #fff;
+      position: relative;
+      overflow: hidden;
+      min-height: 166px;
+    }
+    .dxf-view .label {
+      position: absolute;
+      top: 8px;
+      left: 12px;
+      color: #666;
+      font-size: 12px;
+      z-index: 1;
+      pointer-events: none;
+    }
+    .dxf-view canvas { display: block; width: 100%; height: 100%; }
+
+    .download-bar {
+      background: #f0f2f5;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      border-top: 1px solid #ddd;
+    }
+    .download-bar span { font-size: 14px; color: #333; font-weight: 500; }
+    .download-bar a {
+      display: inline-block;
+      background: linear-gradient(135deg, #1a6dff, #0052d9);
+      color: #fff;
+      text-decoration: none;
+      padding: 6px 16px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .download-bar a:hover { opacity: 0.9; }
+    .download-bar a.disabled {
+      background: #bbb;
+      pointer-events: none;
+    }
+
+    .loading-msg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.5);
+      font-size: 14px;
+    }
+    .dxf-view .loading-msg { color: #999; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CAD 模型查看器</h1>
+    <div class="header-right">
+      <a href="/">← 返回首页</a>
+    </div>
+  </header>
+
+  <!-- Upload zone -->
+  <div class="upload-zone" id="uploadZone">
+    <p>拖拽 STEP 文件到此处，或点击上传</p>
+    <div class="hint">支持 .step / .stp 格式（最大 100MB）</div>
+    <input type="file" id="fileInput" accept=".step,.stp">
+  </div>
+
+  <!-- Upload status -->
+  <div class="upload-status" id="uploadStatus"></div>
+
+  <div class="viewer-container">
+    <div class="panel-3d" id="panel3d">
+      <div class="label">3D 模型 (STL) — 鼠标拖拽旋转 / 滚轮缩放</div>
+      <div class="loading-msg" id="loading3d">上传 STEP 文件后显示 3D 预览</div>
+    </div>
+    <div class="panel-2d">
+      <div class="dxf-view" id="dxfTop">
+        <div class="label">顶视图 (DXF)</div>
+        <div class="loading-msg" id="loadingTop">等待上传...</div>
+      </div>
+      <div class="dxf-view" id="dxfFront">
+        <div class="label">前视图 (DXF)</div>
+        <div class="loading-msg" id="loadingFront">等待上传...</div>
+      </div>
+      <div class="dxf-view" id="dxfSide">
+        <div class="label">侧视图 (DXF)</div>
+        <div class="loading-msg" id="loadingSide">等待上传...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="download-bar" id="downloadBar">
+    <span>下载文件:</span>
+    <a class="disabled" id="dlStep" href="#" download>STEP 模型</a>
+    <a class="disabled" id="dlStl" href="#" download>STL 模型</a>
+    <a class="disabled" id="dlDxfTop" href="#" download>DXF 顶视图</a>
+    <a class="disabled" id="dlDxfFront" href="#" download>DXF 前视图</a>
+    <a class="disabled" id="dlDxfSide" href="#" download>DXF 侧视图</a>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ========== State ==========
+    let viewer3d = null; // { scene, camera, renderer, controls }
+
+    // ========== Upload ==========
+    const uploadZone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const statusEl = document.getElementById('uploadStatus');
+
+    uploadZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) handleUpload(fileInput.files[0]);
+    });
+
+    uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', () => {
+      uploadZone.classList.remove('dragover');
+    });
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
+    });
+
+    function showStatus(msg, type) {
+      statusEl.textContent = msg;
+      statusEl.className = 'upload-status visible ' + (type || '');
+    }
+
+    async function handleUpload(file) {
+      const name = file.name.toLowerCase();
+      if (!name.endsWith('.step') && !name.endsWith('.stp')) {
+        showStatus('只支持 .step / .stp 文件', 'error');
+        return;
+      }
+
+      showStatus('正在上传并转换 ' + file.name + ' ...', '');
+
+      const form = new FormData();
+      form.append('file', file);
+
+      try {
+        const resp = await fetch('/api/cad/upload', { method: 'POST', body: form });
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success) {
+          showStatus('转换失败: ' + (data.error || '未知错误'), 'error');
+          return;
+        }
+
+        showStatus('转换完成！正在加载预览...', 'success');
+        uploadZone.classList.add('hidden');
+
+        loadResults(data);
+      } catch (err) {
+        showStatus('上传失败: ' + err.message, 'error');
+      }
+    }
+
+    function loadResults(data) {
+      const { step, files, errors } = data;
+
+      // Enable download links
+      if (step) enableDl('dlStep', step);
+      if (files.stl) {
+        enableDl('dlStl', files.stl);
+        loadSTL(files.stl);
+      }
+      if (files.dxf_top) {
+        enableDl('dlDxfTop', files.dxf_top);
+        renderDxf('dxfTop', 'loadingTop', files.dxf_top);
+      } else {
+        document.getElementById('loadingTop').textContent = errors.dxf_top_error || '顶视图生成失败';
+      }
+      if (files.dxf_front) {
+        enableDl('dlDxfFront', files.dxf_front);
+        renderDxf('dxfFront', 'loadingFront', files.dxf_front);
+      } else {
+        document.getElementById('loadingFront').textContent = errors.dxf_front_error || '前视图生成失败';
+      }
+      if (files.dxf_side) {
+        enableDl('dlDxfSide', files.dxf_side);
+        renderDxf('dxfSide', 'loadingSide', files.dxf_side);
+      } else {
+        document.getElementById('loadingSide').textContent = errors.dxf_side_error || '侧视图生成失败';
+      }
+    }
+
+    function enableDl(id, url) {
+      const el = document.getElementById(id);
+      el.href = url;
+      el.classList.remove('disabled');
+    }
+
+    // ========== 3D STL Viewer ==========
+    function init3DViewer() {
+      const container = document.getElementById('panel3d');
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x1a1a2e);
+
+      const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 2000);
+      camera.position.set(200, 200, 300);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambient);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(200, 300, 200);
+      scene.add(dirLight);
+      const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+      dirLight2.position.set(-200, -100, -200);
+      scene.add(dirLight2);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.1;
+
+      const grid = new THREE.GridHelper(400, 20, 0x444466, 0x333355);
+      scene.add(grid);
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      window.addEventListener('resize', () => {
+        const nw = container.clientWidth;
+        const nh = container.clientHeight;
+        camera.aspect = nw / nh;
+        camera.updateProjectionMatrix();
+        renderer.setSize(nw, nh);
+      });
+
+      viewer3d = { scene, camera, renderer, controls };
+    }
+
+    function loadSTL(url) {
+      if (!viewer3d) init3DViewer();
+      const { scene, camera, controls } = viewer3d;
+
+      const loader = new STLLoader();
+      loader.load(url, (geometry) => {
+        document.getElementById('loading3d').style.display = 'none';
+        const material = new THREE.MeshPhongMaterial({
+          color: 0x4a90d9,
+          specular: 0x222222,
+          shininess: 60,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+
+        geometry.computeBoundingBox();
+        const box = geometry.boundingBox;
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        mesh.position.sub(center);
+        scene.add(mesh);
+
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        camera.position.set(maxDim, maxDim * 0.8, maxDim * 1.2);
+        controls.target.set(0, 0, 0);
+        controls.update();
+      }, undefined, (err) => {
+        document.getElementById('loading3d').textContent = '3D 加载失败: ' + err.message;
+      });
+    }
+
+    // ========== 2D DXF Viewer ==========
+    function parseDxf(text) {
+      const entities = [];
+      const lines = text.split(/\r?\n/);
+      let i = 0;
+      const next = () => (i < lines.length ? lines[i++].trim() : null);
+
+      while (i < lines.length) {
+        const line = next();
+        if (line === 'ENTITIES') break;
+      }
+
+      while (i < lines.length) {
+        const code = next();
+        const value = next();
+        if (value === 'ENDSEC' || value === 'EOF') break;
+
+        if (code === '0' && value === 'LINE') {
+          const ent = { type: 'LINE' };
+          while (i < lines.length) {
+            const c = next();
+            const v = next();
+            if (c === '0') { i -= 2; break; }
+            const cn = parseInt(c);
+            const vn = parseFloat(v);
+            if (cn === 10) ent.x1 = vn;
+            else if (cn === 20) ent.y1 = vn;
+            else if (cn === 11) ent.x2 = vn;
+            else if (cn === 21) ent.y2 = vn;
+          }
+          entities.push(ent);
+        } else if (code === '0' && value === 'ARC') {
+          const ent = { type: 'ARC' };
+          while (i < lines.length) {
+            const c = next();
+            const v = next();
+            if (c === '0') { i -= 2; break; }
+            const cn = parseInt(c);
+            const vn = parseFloat(v);
+            if (cn === 10) ent.cx = vn;
+            else if (cn === 20) ent.cy = vn;
+            else if (cn === 40) ent.r = vn;
+            else if (cn === 50) ent.startAngle = vn;
+            else if (cn === 51) ent.endAngle = vn;
+          }
+          entities.push(ent);
+        } else if (code === '0' && value === 'CIRCLE') {
+          const ent = { type: 'CIRCLE' };
+          while (i < lines.length) {
+            const c = next();
+            const v = next();
+            if (c === '0') { i -= 2; break; }
+            const cn = parseInt(c);
+            const vn = parseFloat(v);
+            if (cn === 10) ent.cx = vn;
+            else if (cn === 20) ent.cy = vn;
+            else if (cn === 40) ent.r = vn;
+          }
+          entities.push(ent);
+        } else if (code === '0' && value === 'LWPOLYLINE') {
+          const ent = { type: 'LWPOLYLINE', vertices: [], closed: false };
+          let tempX = null;
+          while (i < lines.length) {
+            const c = next();
+            const v = next();
+            if (c === '0') { i -= 2; break; }
+            const cn = parseInt(c);
+            if (cn === 70) ent.closed = (parseInt(v) & 1) === 1;
+            else if (cn === 10) {
+              if (tempX !== null) ent.vertices.push({ x: tempX, y: 0 });
+              tempX = parseFloat(v);
+            } else if (cn === 20 && tempX !== null) {
+              ent.vertices.push({ x: tempX, y: parseFloat(v) });
+              tempX = null;
+            }
+          }
+          if (tempX !== null) ent.vertices.push({ x: tempX, y: 0 });
+          entities.push(ent);
+        } else if (code === '0' && value === 'SPLINE') {
+          const ent = { type: 'LWPOLYLINE', vertices: [], closed: false };
+          let tempX = null;
+          while (i < lines.length) {
+            const c = next();
+            const v = next();
+            if (c === '0') { i -= 2; break; }
+            const cn = parseInt(c);
+            if (cn === 70) ent.closed = (parseInt(v) & 1) === 1;
+            else if (cn === 11) {
+              if (tempX !== null) ent.vertices.push({ x: tempX, y: 0 });
+              tempX = parseFloat(v);
+            } else if (cn === 21 && tempX !== null) {
+              ent.vertices.push({ x: tempX, y: parseFloat(v) });
+              tempX = null;
+            }
+          }
+          if (tempX !== null) ent.vertices.push({ x: tempX, y: 0 });
+          if (ent.vertices.length > 1) entities.push(ent);
+        }
+      }
+      return entities;
+    }
+
+    function renderDxf(containerId, loadingId, url) {
+      const container = document.getElementById(containerId);
+      // Remove any existing canvas
+      const oldCanvas = container.querySelector('canvas');
+      if (oldCanvas) oldCanvas.remove();
+
+      const canvas = document.createElement('canvas');
+      container.appendChild(canvas);
+
+      const loadingEl = document.getElementById(loadingId);
+      loadingEl.textContent = '加载中...';
+      loadingEl.style.display = '';
+
+      fetch(url)
+        .then(r => r.text())
+        .then(text => {
+          loadingEl.style.display = 'none';
+          const entities = parseDxf(text);
+          drawDxf(canvas, container, entities);
+          const ro = new ResizeObserver(() => drawDxf(canvas, container, entities));
+          ro.observe(container);
+        })
+        .catch(err => {
+          loadingEl.textContent = '加载失败: ' + err.message;
+        });
+    }
+
+    function drawDxf(canvas, container, entities) {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      canvas.width = w * devicePixelRatio;
+      canvas.height = h * devicePixelRatio;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      if (entities.length === 0) return;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const e of entities) {
+        if (e.type === 'LINE') {
+          minX = Math.min(minX, e.x1, e.x2); maxX = Math.max(maxX, e.x1, e.x2);
+          minY = Math.min(minY, e.y1, e.y2); maxY = Math.max(maxY, e.y1, e.y2);
+        } else if (e.type === 'ARC' || e.type === 'CIRCLE') {
+          minX = Math.min(minX, e.cx - e.r); maxX = Math.max(maxX, e.cx + e.r);
+          minY = Math.min(minY, e.cy - e.r); maxY = Math.max(maxY, e.cy + e.r);
+        } else if (e.type === 'LWPOLYLINE') {
+          for (const v of e.vertices) {
+            minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+            minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+          }
+        }
+      }
+
+      const padding = 50;
+      const dw = maxX - minX || 1;
+      const dh = maxY - minY || 1;
+      const scale = Math.min((w - padding * 2) / dw, (h - padding * 2) / dh);
+      const offX = (w - dw * scale) / 2 - minX * scale;
+      const offY = (h - dh * scale) / 2 + maxY * scale;
+
+      const tx = (x) => x * scale + offX;
+      const ty = (y) => -y * scale + offY;
+
+      ctx.strokeStyle = '#1a6dff';
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = 'round';
+
+      for (const e of entities) {
+        if (e.type === 'LINE') {
+          ctx.beginPath();
+          ctx.moveTo(tx(e.x1), ty(e.y1));
+          ctx.lineTo(tx(e.x2), ty(e.y2));
+          ctx.stroke();
+        } else if (e.type === 'CIRCLE') {
+          ctx.beginPath();
+          ctx.arc(tx(e.cx), ty(e.cy), e.r * scale, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (e.type === 'ARC') {
+          const sa = (e.startAngle || 0) * Math.PI / 180;
+          const ea = (e.endAngle || 360) * Math.PI / 180;
+          ctx.beginPath();
+          ctx.arc(tx(e.cx), ty(e.cy), e.r * scale, -sa, -ea, true);
+          ctx.stroke();
+        } else if (e.type === 'LWPOLYLINE' && e.vertices.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(tx(e.vertices[0].x), ty(e.vertices[0].y));
+          for (let j = 1; j < e.vertices.length; j++) {
+            ctx.lineTo(tx(e.vertices[j].x), ty(e.vertices[j].y));
+          }
+          if (e.closed) ctx.closePath();
+          ctx.stroke();
+        }
+      }
+
+      drawDimensions(ctx, tx, ty, scale, minX, minY, maxX, maxY, dw, dh);
+    }
+
+    function drawDimensions(ctx, tx, ty, scale, minX, minY, maxX, maxY, dw, dh) {
+      const arrowLen = 8;
+      const dimOffset = 25;
+      const fontSize = 12;
+
+      ctx.strokeStyle = '#e53935';
+      ctx.fillStyle = '#e53935';
+      ctx.lineWidth = 1;
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Horizontal dimension
+      {
+        const y = ty(minY) + dimOffset;
+        const x1 = tx(minX);
+        const x2 = tx(maxX);
+
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x1, ty(minY) + 4); ctx.lineTo(x1, y + 4);
+        ctx.moveTo(x2, ty(minY) + 4); ctx.lineTo(x2, y + 4);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.beginPath();
+        ctx.moveTo(x1, y); ctx.lineTo(x2, y);
+        ctx.stroke();
+
+        drawArrow(ctx, x1, y, 1, 0, arrowLen);
+        drawArrow(ctx, x2, y, -1, 0, arrowLen);
+
+        const label = dw.toFixed(1) + ' mm';
+        const mx = (x1 + x2) / 2;
+        ctx.fillStyle = '#fff';
+        const tw = ctx.measureText(label).width + 8;
+        ctx.fillRect(mx - tw / 2, y - fontSize / 2 - 2, tw, fontSize + 4);
+        ctx.fillStyle = '#e53935';
+        ctx.fillText(label, mx, y);
+      }
+
+      // Vertical dimension
+      {
+        const x = tx(maxX) + dimOffset;
+        const y1 = ty(maxY);
+        const y2 = ty(minY);
+
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(tx(maxX) + 4, y1); ctx.lineTo(x + 4, y1);
+        ctx.moveTo(tx(maxX) + 4, y2); ctx.lineTo(x + 4, y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.beginPath();
+        ctx.moveTo(x, y1); ctx.lineTo(x, y2);
+        ctx.stroke();
+
+        drawArrow(ctx, x, y1, 0, 1, arrowLen);
+        drawArrow(ctx, x, y2, 0, -1, arrowLen);
+
+        const label = dh.toFixed(1) + ' mm';
+        const my = (y1 + y2) / 2;
+        ctx.save();
+        ctx.translate(x, my);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = '#fff';
+        const tw = ctx.measureText(label).width + 8;
+        ctx.fillRect(-tw / 2, -fontSize / 2 - 2, tw, fontSize + 4);
+        ctx.fillStyle = '#e53935';
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    function drawArrow(ctx, x, y, dx, dy, len) {
+      const angle = Math.atan2(dy, dx);
+      const a1 = angle + Math.PI * 0.8;
+      const a2 = angle - Math.PI * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a1) * len, y + Math.sin(a1) * len);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x + Math.cos(a2) * len, y + Math.sin(a2) * len);
+      ctx.stroke();
+    }
+
+    // ========== Init ==========
+    init3DViewer();
+
+    // Check if there are existing files to load (from previous conversions)
+    async function checkExistingFiles() {
+      try {
+        const resp = await fetch('/api/cad/files');
+        const data = await resp.json();
+        if (data.conversions && data.conversions.length > 0) {
+          const latest = data.conversions[0];
+          const files = {};
+          const errors = {};
+          let stepUrl = null;
+
+          for (const [name, url] of Object.entries(latest.files)) {
+            if (name === 'model.stl') files.stl = url;
+            else if (name === 'top_view.dxf') files.dxf_top = url;
+            else if (name === 'front_view.dxf') files.dxf_front = url;
+            else if (name === 'side_view.dxf') files.dxf_side = url;
+          }
+
+          if (Object.keys(files).length > 0) {
+            uploadZone.classList.add('hidden');
+            showStatus('已加载最近的转换结果', 'success');
+            loadResults({ step: stepUrl, files, errors });
+          }
+        }
+      } catch (e) {
+        // silently ignore
+      }
+    }
+    checkExistingFiles();
+  </script>
+</body>
+</html>

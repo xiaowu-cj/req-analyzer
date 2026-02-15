@@ -2,7 +2,9 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs';
+import { appendFileSync, mkdirSync, readFileSync, existsSync, readdirSync } from 'fs';
+import { execFile } from 'child_process';
+import multer from 'multer';
 import officeparser from 'officeparser';
 import JSZip from 'jszip';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
@@ -16,6 +18,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(join(__dirname, 'public')));
+app.use('/cad_output', express.static(join(__dirname, 'cad_output')));
 
 // Chat log
 const logDir = join(__dirname, 'logs');
@@ -225,6 +228,118 @@ app.post('/api/export-summary', async (req, res) => {
     res.send(buffer);
   } catch (err) {
     console.error('Export error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== STEP 文件上传与转换 ==========
+const uploadDir = join(__dirname, 'cad_output', 'uploads');
+const convertedDir = join(__dirname, 'cad_output', 'converted');
+mkdirSync(uploadDir, { recursive: true });
+mkdirSync(convertedDir, { recursive: true });
+
+const stepUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+      const ts = Date.now();
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+      cb(null, `${ts}_${safeName}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const ext = file.originalname.toLowerCase();
+    if (ext.endsWith('.step') || ext.endsWith('.stp')) {
+      cb(null, true);
+    } else {
+      cb(new Error('只支持 .step / .stp 文件'));
+    }
+  },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+});
+
+// POST /api/cad/upload — 上传 STEP 并转换为 DXF + STL
+app.post('/api/cad/upload', (req, res, next) => {
+  stepUpload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}, (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: '未收到文件' });
+  }
+
+  const inputPath = req.file.path;
+  const ts = Date.now();
+  const outDir = join(convertedDir, String(ts));
+  mkdirSync(outDir, { recursive: true });
+
+  // 查找 cad-env 虚拟环境的 Python
+  const cadEnvPython = join(__dirname, 'cad-env', 'bin', 'python');
+  const pythonCmd = existsSync(cadEnvPython) ? cadEnvPython : 'python3';
+  const scriptPath = join(__dirname, 'convert_step.py');
+
+  execFile(pythonCmd, [scriptPath, inputPath, outDir], { timeout: 120000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('STEP 转换失败:', err.message, stderr);
+      return res.status(500).json({ error: '转换失败: ' + (stderr || err.message) });
+    }
+
+    let result;
+    try {
+      result = JSON.parse(stdout);
+    } catch (e) {
+      console.error('转换输出解析失败:', stdout);
+      return res.status(500).json({ error: '转换输出解析失败' });
+    }
+
+    if (result.error) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    // 构建 URL 列表
+    const baseUrl = `/cad_output/converted/${ts}`;
+    const fileUrls = {};
+    for (const [key, filename] of Object.entries(result.files || {})) {
+      if (!key.endsWith('_error')) {
+        fileUrls[key] = `${baseUrl}/${filename}`;
+      }
+    }
+
+    // 原始 STEP 文件 URL
+    const stepUrl = `/cad_output/uploads/${req.file.filename}`;
+
+    res.json({
+      success: true,
+      step: stepUrl,
+      files: fileUrls,
+      errors: Object.fromEntries(
+        Object.entries(result.files || {}).filter(([k]) => k.endsWith('_error'))
+      ),
+      timestamp: ts,
+    });
+  });
+});
+
+// GET /api/cad/files — 列出已转换的文件
+app.get('/api/cad/files', (req, res) => {
+  try {
+    if (!existsSync(convertedDir)) {
+      return res.json({ conversions: [] });
+    }
+    const dirs = readdirSync(convertedDir).sort().reverse();
+    const conversions = dirs.map(dir => {
+      const dirPath = join(convertedDir, dir);
+      const files = readdirSync(dirPath);
+      const fileUrls = {};
+      for (const f of files) {
+        fileUrls[f] = `/cad_output/converted/${dir}/${f}`;
+      }
+      return { timestamp: dir, files: fileUrls };
+    });
+    res.json({ conversions });
+  } catch (err) {
+    console.error('列出文件错误:', err);
     res.status(500).json({ error: err.message });
   }
 });
